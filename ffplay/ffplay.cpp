@@ -13,7 +13,7 @@
 // tutorial07 myvideofile.mpg
 //
 // to play the video.
-
+extern "C"{
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavformat/avio.h>
@@ -22,14 +22,21 @@
 #include <libavutil/avstring.h>
 #include <libavutil/opt.h>
 #include <libavutil/time.h>
-
-#include <SDL.h>
-#include <SDL_thread.h>
-#ifdef __MINGW32__
-#undef main /* Prevents SDL from overriding main() */
-#endif
+}
+#include <SDL/SDL.h>
+#include <SDL/SDL_thread.h>
+#undef main
 #include <stdio.h>
 #include <math.h>
+
+#pragma warning( disable : 4996)
+#pragma comment(lib,"avformat.lib")
+#pragma comment(lib,"avcodec.lib")
+#pragma comment(lib,"avutil.lib")
+#pragma comment(lib,"swresample.lib")
+#pragma comment(lib,"swscale.lib")
+#pragma comment(lib,"sdl.lib")
+#pragma comment(lib,"sdlmain.lib")
 
 #define SDL_AUDIO_BUFFER_SIZE 1024
 #define MAX_AUDIO_FRAME_SIZE 192000
@@ -132,7 +139,7 @@ int packet_queue_put(PacketQueue *q, AVPacket *pkt) {
 	if (pkt != &flush_pkt && av_dup_packet(pkt) < 0) {
 		return -1;
 	}
-	pkt1 = av_malloc(sizeof(AVPacketList));
+	pkt1 = (AVPacketList*)av_malloc(sizeof(AVPacketList));
 	if (!pkt1)
 		return -1;
 	pkt1->pkt = *pkt;
@@ -330,7 +337,7 @@ int decode_frame_from_packet(VideoState *is, AVFrame decoded_frame)
 	dst_rate = decoded_frame.sample_rate;
 	src_ch_layout = decoded_frame.channel_layout;
 	dst_ch_layout = decoded_frame.channel_layout;
-	src_sample_fmt = decoded_frame.format;
+	src_sample_fmt = (AVSampleFormat)decoded_frame.format;
 	dst_sample_fmt = AV_SAMPLE_FMT_S16;
 
 	av_opt_set_int(is->sws_ctx_audio, "in_channel_layout", src_ch_layout, 0);
@@ -341,7 +348,7 @@ int decode_frame_from_packet(VideoState *is, AVFrame decoded_frame)
 	av_opt_set_sample_fmt(is->sws_ctx_audio, "out_sample_fmt", dst_sample_fmt, 0);
 
 	/* initialize the resampling context */
-	if ((ret = swr_init(is->sws_ctx_audio)) < 0) {
+	if ((ret = swr_init((SwrContext*)is->sws_ctx_audio)) < 0) {
 		fprintf(stderr, "Failed to initialize the resampling context\n");
 		return -1;
 	}
@@ -368,10 +375,10 @@ int decode_frame_from_packet(VideoState *is, AVFrame decoded_frame)
 	}
 
 	/* compute destination number of samples */
-	dst_nb_samples = av_rescale_rnd(swr_get_delay(is->sws_ctx_audio, src_rate) + src_nb_samples, dst_rate, src_rate, AV_ROUND_UP);
+	dst_nb_samples = av_rescale_rnd(swr_get_delay((SwrContext*)is->sws_ctx_audio, src_rate) + src_nb_samples, dst_rate, src_rate, AV_ROUND_UP);
 
 	/* convert to destination format */
-	ret = swr_convert(is->sws_ctx_audio, dst_data, dst_nb_samples, (const uint8_t **)decoded_frame.data, src_nb_samples);
+	ret = swr_convert((SwrContext*)is->sws_ctx_audio, dst_data, dst_nb_samples, (const uint8_t **)decoded_frame.data, src_nb_samples);
 	if (ret < 0) {
 		fprintf(stderr, "Error while converting\n");
 		return -1;
@@ -764,7 +771,7 @@ uint64_t global_video_pkt_pts = AV_NOPTS_VALUE;
 */
 int our_get_buffer(struct AVCodecContext *c, AVFrame *pic) {
 	int ret = avcodec_default_get_buffer(c, pic);
-	uint64_t *pts = av_malloc(sizeof(uint64_t));
+	uint64_t *pts = (uint64_t*)av_malloc(sizeof(uint64_t));
 	*pts = global_video_pkt_pts;
 	pic->opaque = pts;
 	return ret;
@@ -873,7 +880,7 @@ int stream_component_open(VideoState *is, int stream_index) {
 		/* Correct audio only if larger error than this */
 		is->audio_diff_threshold = 2.0 * SDL_AUDIO_BUFFER_SIZE / codecCtx->sample_rate;
 
-		is->sws_ctx_audio = swr_alloc();
+		is->sws_ctx_audio = (SwsContext*)swr_alloc();
 		if (!is->sws_ctx_audio) {
 			fprintf(stderr, "Could not allocate resampler context\n");
 			return -1;
@@ -907,7 +914,7 @@ int stream_component_open(VideoState *is, int stream_index) {
 			NULL,
 			NULL
 			);
-		codecCtx->get_buffer2 = our_get_buffer;
+		codecCtx->get_buffer2 = (int(__cdecl *)(AVCodecContext *, AVFrame *, int))our_get_buffer;
 		codecCtx->release_buffer = our_release_buffer;
 
 		break;
@@ -1070,7 +1077,7 @@ int main(int argc, char *argv[]) {
 	//double          pts;
 	VideoState      *is;
 
-	is = av_mallocz(sizeof(VideoState));
+	is = (VideoState*)av_mallocz(sizeof(VideoState));
 
 	if (argc < 2) {
 		fprintf(stderr, "Usage: test <file>\n");
